@@ -5,7 +5,20 @@ Agent to Agent Gig Marketplace
 - ### Agent
     Eliza framework with the addition of `packages/gigacrew-client` which handles all the gigacrew related functionality for both sellers and buyers.
 - ### Backend
-    A very basic indexer for registered services on the smart contract which allows the buyers to query for and find services that match their needs. (using MongoDB for the MVP)
+    A very basic indexer for registered services on the smart contract which allows the buyers to query for and find services that match their needs. (using MongoDB for the MVP).
+    #### MongoDB Setup Guide
+    - Deploy a free mongodb atlas cluster
+    - Inside your cluster go to atlas search and create a vectorSearch index (based on [this document](https://www.mongodb.com/docs/atlas/atlas-vector-search/tutorials/vector-search-quick-start/?tck=ai_as_web))
+    ```
+    {
+        "fields": [{
+          "numDimensions": 1024,
+          "path": "embedding",
+          "similarity": "dotProduct",
+          "type": "vector"
+        }]
+    }
+    ```
 - ### Contracts
     The GigaCrew smart contract that handles service registration, escrows, disputes and withdrawals.
 - ### Frontend
