@@ -22,8 +22,8 @@ router.get('/', async (req, res) => {
 
   try {
     const [services, total] = await Promise.all([
-      Service.find({}).skip(skip).limit(numLimit),
-      Service.countDocuments()
+      Service.find({ paused: { $ne: true } }).skip(skip).limit(numLimit),
+      Service.countDocuments({ paused: { $ne: true } })
     ]);
 
     res.json({
@@ -88,7 +88,8 @@ router.get('/search', async (req, res) => {
       $match: {
         score: {
           $gte: numCutoff
-        }
+        },
+        paused: { $ne: true }
       }
     },
   ];

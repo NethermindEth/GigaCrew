@@ -121,99 +121,123 @@ export const GigaCrewHireAction: Action = {
         elizaLogger.log("GigaCrew HIRE_AGENT action called", {
             message: message.content.text,
         });
-        
+        const client: GigaCrewClient = runtime.clients["gigacrew"] as GigaCrewClient;
+
         // Generate service query
-        const searchContext = composeContext({
-            state,
-            template: searchServiceTemplate,
-        });
-        let query = await generateText({
-            runtime,
-            context: searchContext,
-            modelClass: ModelClass.SMALL,
-        });
-        elizaLogger.log("GigaCrew HIRE_AGENT action generated service query", {
-            serviceQuery: query,
-        });
+        const query = await generateServiceQuery(runtime, state);
 
         // Search for services
-        const client: GigaCrewClient = runtime.clients["gigacrew"];
-        let services = null;
-        let serviceSelectionResponse = null;
-        let retries = 0;
-        do {
-            services = await client.buyerHandler.searchServices(query);
-            elizaLogger.log("GigaCrew HIRE_AGENT action searched for services", {
-                services,
-            });
+        const { services, serviceSelectionResponse } = await searchServices(runtime, query, state);
 
-            // Decide which service to hire if any
-            state["serviceQuery"] = query;
-            state["serviceList"] = services.length == 0 ? "NO SERVICES FOUND" : services.map(service => `ID: ${service.serviceId} - Title: ${service.title.replace(/\\n/g, " ")} - Description: ${service.description.replace(/\\n/g, " ")}`).join("\n");
-            const serviceContext = composeContext({
-                state,
-                template: selectServiceTemplate,
-            });
-            serviceSelectionResponse = await generateMessageResponse({
-                runtime,
-                context: serviceContext,
-                modelClass: ModelClass.SMALL,
-            });
-
-            elizaLogger.log("GigaCrew HIRE_AGENT service selection response", serviceSelectionResponse);
-
-            if (serviceSelectionResponse.new_query && serviceSelectionResponse.new_query.length > 0) {
-                query = serviceSelectionResponse.new_query as string;
-            } else {
-                query = null;
-            }
-            retries++;
-        } while (query && retries < 3);
-
-        let service = null;
-        if (serviceSelectionResponse.chosen_service_id != null && serviceSelectionResponse.chosen_service_id != undefined) {
-            const service_id = serviceSelectionResponse.chosen_service_id.toString();
-            service = services.find(service => service.serviceId === service_id);
-        } else if (serviceSelectionResponse.apology && serviceSelectionResponse.apology.length > 0) {
-            // APOLOGIZE
-            elizaLogger.log("GigaCrew HIRE_AGENT action no service selected... using apology");
+        // Handle service selection
+        const service = await handleServiceSelection(serviceSelectionResponse, services);
+        if (typeof service === "string") {
             return callback({
-                text: serviceSelectionResponse.apology as string,
-            });
-        }
-
-        if (!service) {
-            // APOLOGIZE
-            elizaLogger.log("GigaCrew HIRE_AGENT action bad serviceId... using fallback apology");
-            return callback({
-                text: "I couldn't find a service that does what's needed. I'm sorry.",
+                text: service,
             });
         }
 
         // Generate context for the service provider
-        state["serviceTitle"] = service.title;
-        state["serviceDescription"] = service.description;
-        const context = composeContext({
-            state,
-            template: workContextTemplate,
-        });
-        const workContext = await generateText({
-            runtime,
-            context,
-            modelClass: ModelClass.SMALL,
-        });
-        elizaLogger.log("GigaCrew HIRE_AGENT action generated work context to be sent to the agent", {
-            workContext,
-        });
+        const workContext = await generateWorkContext(runtime, service, state);
 
         // Hire agent
-        const orderId = await client.buyerHandler.createEscrow(service, 100, workContext);
-        elizaLogger.log("GigaCrew HIRE_AGENT action created escrow... Waiting for work to be done", {
-            orderId,
-        });
-        const work = await client.buyerHandler.waitForWork(orderId);
+        const work = await createAndWaitForWork(client, service, workContext);
         callback({
             text: work,
         });
     }
+}
+
+export async function generateServiceQuery(runtime: IAgentRuntime, state: State) {
+    const searchContext = composeContext({
+        state,
+        template: searchServiceTemplate,
+    });
+    const query = await generateText({ runtime, context: searchContext, modelClass: ModelClass.SMALL });
+    elizaLogger.log("GigaCrew: Generated service query", {
+        serviceQuery: query,
+    });
+    return query;
+}
+
+export async function searchServices(runtime: IAgentRuntime, query: string, state: State) {
+    let services = null;
+    let serviceSelectionResponse = null;
+    let retries = 0;
+    const client: GigaCrewClient = runtime.clients["gigacrew"] as GigaCrewClient;
+    do {
+        services = await client.buyerHandler.searchServices(query);
+        elizaLogger.log("GigaCrew HIRE_AGENT action searched for services", {
+            services,
+        });
+
+        // Decide which service to hire if any
+        state["serviceQuery"] = query;
+        state["serviceList"] = !Array.isArray(services) || services.length == 0 ? "NO SERVICES FOUND" : services.map(service => `ID: ${service.serviceId} - Title: ${service.title.replace(/\\n/g, " ")} - Description: ${service.description.replace(/\\n/g, " ")}`).join("\n");
+        const serviceContext = composeContext({
+            state,
+            template: selectServiceTemplate,
+        });
+        serviceSelectionResponse = await generateMessageResponse({
+            runtime,
+            context: serviceContext,
+            modelClass: ModelClass.SMALL,
+        });
+
+        elizaLogger.log("GigaCrew: Service selection response", serviceSelectionResponse);
+
+        if (serviceSelectionResponse.new_query && serviceSelectionResponse.new_query.length > 0) {
+            query = serviceSelectionResponse.new_query as string;
+        } else {
+            query = null;
+        }
+        retries++;
+    } while (query && retries < 3);
+    return { services, serviceSelectionResponse };
+}
+
+export async function handleServiceSelection(serviceSelectionResponse: any, services: any[]) {
+    let service = null;
+    if (serviceSelectionResponse.chosen_service_id != null && serviceSelectionResponse.chosen_service_id != undefined) {
+        const service_id = serviceSelectionResponse.chosen_service_id.toString();
+        service = services.find(service => service.serviceId === service_id);
+    } else if (serviceSelectionResponse.apology && serviceSelectionResponse.apology.length > 0) {
+        // APOLOGIZE
+        elizaLogger.log("GigaCrew HIRE_AGENT action no service selected... using apology");
+        return serviceSelectionResponse.apology as string;
+    }
+
+    if (!service) {
+        // APOLOGIZE
+        elizaLogger.log("GigaCrew HIRE_AGENT action bad serviceId... using fallback apology");
+        return "I couldn't find a service that does what's needed. I'm sorry.";
+    }
+
+    return service;
+}
+
+export async function generateWorkContext(runtime: IAgentRuntime, service: any, state: State) {
+    state["serviceTitle"] = service.title;
+    state["serviceDescription"] = service.description;
+    const context = composeContext({
+        state,
+        template: workContextTemplate,
+    });
+    const workContext = await generateText({
+        runtime,
+        context,
+        modelClass: ModelClass.SMALL,
+    });
+    elizaLogger.log("GigaCrew: Generated work context", {
+        workContext,
+    });
+    return workContext;
+}
+
+export async function createAndWaitForWork(client: GigaCrewClient, service: any, workContext: string) {
+    const orderId = await client.buyerHandler.createEscrow(service, 100, workContext);
+    elizaLogger.log("GigaCrew: Waiting for work to be done", {
+        orderId,
+    });
+    return await client.buyerHandler.waitForWork(orderId);
 }

@@ -33,7 +33,18 @@ class ServiceIndexer {
     }
 
     async start() {
-        this.filters.push({ event: await this.contract.filters.ServiceRegistered().getTopicFilter(), handler: this.handleServiceRegistered.bind(this) });
+        this.filters.push({
+            event: await this.contract.filters.ServiceRegistered().getTopicFilter(),
+            handler: this.handleServiceRegistered.bind(this)
+        });
+        this.filters.push({
+            event: await this.contract.filters.ServicePaused().getTopicFilter(),
+            handler: this.handleServicePaused.bind(this)
+        });
+        this.filters.push({
+            event: await this.contract.filters.ServiceResumed().getTopicFilter(),
+            handler: this.handleServiceResumed.bind(this)
+        });
         const fromBlock = await getLastBlock();
         console.log(`Starting indexer from block ${fromBlock}`);
 
@@ -51,7 +62,9 @@ class ServiceIndexer {
     
         for (const filter of this.filters) {
             const events = await this.contract.queryFilter(filter.event, fromBlock as BlockTag, toBlock as BlockTag);
-            events.forEach(filter.handler);
+            for (const event of events) {
+                await filter.handler(event);
+            }
         }
 
         await LastBlock.updateOne({}, { blockNumber: toBlock }, { upsert: true });
@@ -64,14 +77,27 @@ class ServiceIndexer {
     async handleServiceRegistered(event: any) {
         const [serviceId, provider] = event.args;
         console.log(`New service registered: ${serviceId} by ${provider}`);
-        const [seller, title, description, communicationChannel, price] = await this.contract.services(serviceId);
+        const [paused, seller, title, description, communicationChannel, price] = await this.contract.services(serviceId);
         await Service.updateOne({ serviceId: serviceId.toString() }, {
+            paused,
             seller,
             title,
             description,
             communicationChannel,
             price
         }, { upsert: true });
+    }
+
+    async handleServicePaused(event: any) {
+        const [serviceId] = event.args;
+        console.log(`Service paused: ${serviceId}`);
+        await Service.updateOne({ serviceId: serviceId.toString() }, { paused: true }, { upsert: true });
+    }
+
+    async handleServiceResumed(event: any) {
+        const [serviceId] = event.args;
+        console.log(`Service resumed: ${serviceId}`);
+        await Service.updateOne({ serviceId: serviceId.toString() }, { paused: false }, { upsert: true });
     }
 };
 

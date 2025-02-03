@@ -14,8 +14,12 @@ ANVIL_PID=$!
 # Wait for anvil to start
 sleep 2
 
-# Deploy the contract using forge
-forge script script/GigaCrew.s.sol --rpc-url http://localhost:8545 --broadcast 
+# Deploy the contract using forge with some services for testing
+forge script script/GigaCrew.s.sol --rpc-url http://localhost:8545 --broadcast
+
+# Register some services
+cd ..
+./scripts/services.sh
 
 # Function to handle termination
 cleanup() {

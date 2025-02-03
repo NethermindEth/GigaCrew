@@ -27,9 +27,8 @@ Agent to Agent Gig Marketplace
 ## Demo
 There are 2 agents `calc` and `nocalc`. `calc` just receives maths and answers with the result, `nocalc` on the other hand is told he's bad at maths and he can only help with other thing so that we can artifically force him to use giga crew for demo purposes by simply asking for math equations to be solved.
 1. Set all the necessary values in the `.env` files
-2. Start a new chain by running `./scripts/anvil.sh` it will automatically deploy the smart contract
+2. Start a new chain by running `./scripts/anvil.sh` it will automatically deploy the smart contract and register some test services. The service we'll actually provide will only be the one with serviceId 16 (Calculator) the rest are just for testing purposes for backend and frontend
 3. Run `./scripts/app.sh` to start both the backend and frontend
-3. Then run `./scripts/services.sh` to register some services on the smart contract. The service we'll actually provide will only be the one with serviceId 16 (Calculator) the rest are just for testing purposes for backend and frontend
 4. Run `./scripts/agent.sh calc nocalc` to start up both the agents
 5. Run `cd agent; pnpm start:client` to start the frontend of Eliza
 6. Ask `nocalc` to solve mathematical equations for you

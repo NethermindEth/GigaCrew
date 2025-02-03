@@ -3,8 +3,8 @@ pragma solidity ^0.8.13;
 
 contract GigaCrew {
     // TODO: Maybe make these configurable per escrow?
-    uint256 public lockPeriod = 2 minutes;
-    uint256 public disputeResolutionPeriod = 2 minutes;
+    uint256 public lockPeriod = 1 minutes;
+    uint256 public disputeResolutionPeriod = 1 minutes;
 
     // TODO: Hardcoded for MVP
     address[] public judges;
@@ -12,6 +12,7 @@ contract GigaCrew {
     // Technically doesn't have to be a part of this smart contract
     // We only need a decentralized way to store and serve service data for potential buyers to find
     struct Service {
+        bool paused;
         address provider;
         string title;
         string description;
@@ -52,8 +53,10 @@ contract GigaCrew {
 
     // Events
     event ServiceRegistered(uint256 indexed serviceId, address indexed provider);
+    event ServicePaused(uint256 indexed serviceId);
+    event ServiceResumed(uint256 indexed serviceId);
     event EscrowCreated(uint256 orderId, uint256 indexed serviceId, address indexed buyer, address indexed seller, string context, uint256 deadline);
-    event EscrowDisputed(uint256 indexed orderId);
+    event EscrowDisputed(uint256 indexed orderId, uint256 disputeResolutionPeriod);
     event PoWSubmitted(uint256 indexed orderId, address indexed buyer, address indexed seller, string work, uint256 lockPeriod);
     event FundsWithdrawn(uint256 indexed orderId, address indexed to, uint256 amount);
     event DisputeVote(uint256 indexed orderId, uint256 indexed judgeId, uint256 buyerShare);
@@ -143,6 +146,7 @@ contract GigaCrew {
     ) external returns (uint256 service_id) {
         service_id = lastServiceId;
         services[service_id] = Service({
+            paused: false,
             provider: msg.sender,
             title: _title,
             description: _description,
@@ -153,12 +157,28 @@ contract GigaCrew {
         lastServiceId++;
     }
 
+    function pauseService(uint256 _serviceId) external {
+        if (services[_serviceId].provider != msg.sender) {
+            revert MustBeSeller();
+        }
+        services[_serviceId].paused = true;
+        emit ServicePaused(_serviceId);
+    }
+
+    function resumeService(uint256 _serviceId) external {
+        if (services[_serviceId].provider != msg.sender) {
+            revert MustBeSeller();
+        }
+        services[_serviceId].paused = false;
+        emit ServiceResumed(_serviceId);
+    }
+
     function createEscrow(
         uint256 _serviceId,
         uint256 _deadlinePeriod,
         string memory _context
     ) external payable returns (uint256 order_id) {
-        if (_serviceId >= lastServiceId) {
+        if (_serviceId >= lastServiceId || services[_serviceId].paused) {
             revert InvalidServiceId();
         }
 
@@ -221,7 +241,7 @@ contract GigaCrew {
             votes: 0,
             timestamp: block.timestamp
         });
-        emit EscrowDisputed(_orderId);
+        emit EscrowDisputed(_orderId, block.timestamp + disputeResolutionPeriod);
     }
 
     // TODO: Just an MVP

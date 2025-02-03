@@ -78,19 +78,31 @@ export class GigaCrewSellerHandler {
     }
 
     async handleOrders() {
-        const orders = await this.db.getActiveOrders();
-        let deleteIds = [];
+        const orders = await this.db.getActiveOrdersForSeller(this.seller.address);
         for (const order of orders) {
             const { order_id: orderId, service_id: serviceId, buyer_address: buyer, seller_address: seller, context, deadline } = order;
             const deadlineTimestamp = new Date(deadline + 'Z').getTime() / 1000;
             if (this.isExpired(deadlineTimestamp)) {
                 elizaLogger.log("Order is expired, skipping", { orderId, serviceId, buyer, seller, context, deadline });
-                deleteIds.push(orderId);
                 continue;
             }
 
+            let response = (await this.db.getOrder(orderId))?.work;
+            if (!response) {
+                try {
+                    response = await this.work(this.runtime, orderId, buyer, context);
+                    await this.db.setWork(orderId, response);
+                } catch (error) {
+                    await this.db.incrementFailedAttempts(orderId);
+                    elizaLogger.error("Error doing work", {
+                        orderId,
+                        error
+                    });
+                    continue;
+                }
+            }
+            
             try {
-                const response = await this.work(this.runtime, orderId, buyer, context);
                 const tx = await (await this.contract.submitPoW(orderId, response)).wait();
 
                 elizaLogger.log("Work Submitted!", {
@@ -102,24 +114,20 @@ export class GigaCrewSellerHandler {
                 const lockPeriod = tx.logs[0].args[4].toString();
                 await this.db.setLockPeriod(orderId, lockPeriod);
             } catch (error) {
-                deleteIds.push(orderId);
                 elizaLogger.error("Error submitting work", {
                     orderId,
                     error
                 });
             }
         }
-
-        await this.db.deleteOrdersById(deleteIds);
-        await this.db.deleteInactiveOrders();
         setTimeout(() => {
             this.handleOrders();
         }, 2000);
     }
 
     async handleWithdrawals() {
-        const withdrawals = await this.db.getWithdrawableOrders();
-        const deleteIds = [];
+        const withdrawals = await this.db.getWithdrawableOrdersForSeller(this.seller.address);
+        const cantWithdrawIds = [];
 
         for (const withdrawal of withdrawals) {
             const { order_id: orderId } = withdrawal;
@@ -129,7 +137,7 @@ export class GigaCrewSellerHandler {
                     const buyerShare = await this.contract.disputeResult(orderId);
                     if (buyerShare == 100) {
                         // Fully resolved in favor of buyer
-                        deleteIds.push(orderId);
+                        cantWithdrawIds.push(orderId);
                         continue;
                     }
                 } catch (error) {
@@ -148,7 +156,7 @@ export class GigaCrewSellerHandler {
                     tx
                 });
 
-                deleteIds.push(orderId);
+                cantWithdrawIds.push(orderId);
             } catch (error) {
                 elizaLogger.error("Error withdrawing funds", {
                     orderId,
@@ -162,7 +170,7 @@ export class GigaCrewSellerHandler {
             }
         }
 
-        await this.db.deleteOrdersById(deleteIds);
+        await this.db.setCanSellerWithdraw(cantWithdrawIds, false);
         setTimeout(() => {
             this.handleWithdrawals();
         }, 2000);

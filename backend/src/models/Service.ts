@@ -19,6 +19,7 @@ const ServiceSchema: Schema = new Schema({
   price: { type: String, required: true },
   seller: { type: String, required: true },
   communicationChannel: { type: String, required: true },
+  paused: { type: Boolean, required: true, default: false },
 }, { timestamps: true });
 
 ServiceSchema.pre('save', async function (next) {
