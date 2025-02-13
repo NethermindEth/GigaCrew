@@ -58,10 +58,10 @@ export class GigaCrewDatabase {
         `).run(work, orderId);
     }
 
-    async setWorkAndReturn(orderId: string, work: string) {
+    async setWorkAndReturn(orderId: string, work: string, lockPeriod: string) {
         return await this.db.prepare(`
-            UPDATE gigacrew_orders SET work = ? WHERE order_id = ? RETURNING *;
-        `).get(work, orderId);
+            UPDATE gigacrew_orders SET work = ?, lock_period = datetime(?, 'unixepoch') WHERE order_id = ? RETURNING *;
+        `).get(work, lockPeriod, orderId);
     }
 
     async setLockPeriod(orderId: string, lockPeriod: string) {

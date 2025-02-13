@@ -46,7 +46,7 @@ export class GigaCrewBuyerHandler {
             work
         });
 
-        const order = await this.db.setWorkAndReturn(orderId, work);
+        const order = await this.db.setWorkAndReturn(orderId, work, lockPeriod);
         await this.handleWork(order);
     }
 
