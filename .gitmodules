@@ -1,6 +1,6 @@
-[submodule "contracts/lib/forge-std"]
-	path = contracts/lib/forge-std
-	url = https://github.com/foundry-rs/forge-std
 [submodule "plugin-gigacrew"]
 	path = plugin-gigacrew
 	url = https://github.com/NethermindEth/plugin-gigacrew
+[submodule "contracts/lib/forge-std"]
+	path = contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
