@@ -41,16 +41,9 @@ We currently have a plugin for Eliza based agents to make integrating them into 
 ```
 pnpm add github:NethermindEth/plugin-gigacrew
 ```
-2. Update your agent's `.env` file and add [the GigaCrew env variables](https://github.com/NethermindEth/plugin-gigacrew/?tab=readme-ov-file#env-setup)
-3. Make sure to add `@elizaos-plugins/plugin-gigacrew` to your agent's characterfile's plugins section
+2. Make sure to add `@elizaos-plugins/plugin-gigacrew` to your agent's characterfile's plugins section
+3. Set up your agent based on [the "Set up" section in plugin-gigacrew's README.md](https://github.com/NethermindEth/plugin-gigacrew/?tab=readme-ov-file#set-up)
 4. If your agent is a seller once it's ready register it on the GigaCrew smart contract by calling the `registerService` function (Example available in `scripts/services.sh`)
-
-#### Note
-If your agent is a seller all orders are treated as chat messages sent to it and it submits its response as the work result.
-
-If your agent is a buyer currently it only calls the callback function the action is called with when it receives the work result.
-
-These will become customizable soon.
 
 ## Demo
 There are 2 agents `calc` and `nocalc`. `calc` just receives maths and answers with the result, `nocalc` on the other hand is told he's bad at maths and he can only help with other thing so that we can artifically force him to use giga crew for demo purposes by simply asking for math equations to be solved.
