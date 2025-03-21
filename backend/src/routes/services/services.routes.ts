@@ -77,8 +77,8 @@ router.get('/search', async (req, res) => {
         serviceId: 1,
         title: 1,
         description: 1,
-        price: 1,
-        seller: 1,
+        provider: 1,
+        communicationChannel: 1,
         score: {
           $meta: 'vectorSearchScore'
         }

@@ -100,16 +100,15 @@ class ServiceIndexer {
     }
 
     async handleServiceRegistered(event: any) {
-        const [serviceId, provider] = event.args;
-        console.log(`New service registered: ${serviceId} by ${provider}`);
-        const [paused, seller, title, description, communicationChannel, price] = await this.contract.services(serviceId);
+        const [serviceId, _provider] = event.args;
+        console.log(`New service registered: ${serviceId} by ${_provider}`);
+        const [paused, provider, title, description, communicationChannel] = await this.contract.services(serviceId);
         await Service.updateOne({ serviceId: serviceId.toString() }, {
             paused,
-            seller,
+            provider,
             title,
             description,
-            communicationChannel,
-            price
+            communicationChannel
         }, { upsert: true });
     }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract GigaCrew {
     // TODO: Maybe make these configurable per escrow?
@@ -17,17 +18,14 @@ contract GigaCrew {
         string title;
         string description;
         string communicationChannel;
-        uint256 rate;
     }
 
     enum EscrowStatus { Pending, Disputed, BuyerWithdrawn, SellerWithdrawn, Withdrawn }
     struct Escrow {
         address buyer;
         address seller;
-        uint256 serviceId;
         uint256 amount;
         uint256 deadline;
-        string context;
         EscrowStatus status;
     }
 
@@ -44,24 +42,26 @@ contract GigaCrew {
 
     // State variables
     mapping(uint256 => Service) public services;
-    mapping(uint256 => Escrow) public escrows; 
-    mapping(uint256 => PoW) public pows;
-    mapping(uint256 => Dispute) public disputes;
-    mapping(uint256 => mapping(uint256 => bool)) public judgeVotes;
+    mapping(bytes32 => Escrow) public escrows; 
+    mapping(bytes32 => PoW) public pows;
+    mapping(bytes32 => Dispute) public disputes;
+    mapping(bytes32 => mapping(uint256 => bool)) public judgeVotes;
     uint256 public lastServiceId;
-    uint256 public lastOrderId;
 
     // Events
     event ServiceRegistered(uint256 indexed serviceId, address indexed provider);
+    event EscrowCreated(bytes32 indexed orderId, address indexed buyer, address indexed seller, uint256 amount, uint256 deadline);
+    event EscrowDisputed(bytes32 indexed orderId, uint256 disputeResolutionPeriod);
+    event PoWSubmitted(bytes32 indexed orderId, address indexed buyer, address indexed seller, string work, uint256 lockPeriod);
+    event FundsWithdrawn(bytes32 indexed orderId, address indexed to, uint256 amount);
+    event DisputeVote(bytes32 indexed orderId, uint256 indexed judgeId, uint256 buyerShare);
     event ServicePaused(uint256 indexed serviceId);
     event ServiceResumed(uint256 indexed serviceId);
-    event EscrowCreated(uint256 orderId, uint256 indexed serviceId, address indexed buyer, address indexed seller, string context, uint256 deadline);
-    event EscrowDisputed(uint256 indexed orderId, uint256 disputeResolutionPeriod);
-    event PoWSubmitted(uint256 indexed orderId, address indexed buyer, address indexed seller, string work, uint256 lockPeriod);
-    event FundsWithdrawn(uint256 indexed orderId, address indexed to, uint256 amount);
-    event DisputeVote(uint256 indexed orderId, uint256 indexed judgeId, uint256 buyerShare);
 
     // Errors
+    error ProposalExpired();
+    error InvalidSignature();
+
     error NoDispute();
     error DisputeResolutionPeriodPassed(uint256 deadline);
     error DisputeResolutionPeriodNotPassed(uint256 deadline);
@@ -85,31 +85,32 @@ contract GigaCrew {
     error EscrowWithoutEnoughFunding();
     error EscrowAlreadyWithdrawn();
     error EscrowNotPending(EscrowStatus status);
-    
+    error EscrowAlreadyExists();
+
     // Modifiers
-    function _escrowExists(uint256 _orderId) internal view {
-        if (_orderId >= lastOrderId) {
+    function _escrowExists(bytes32 _orderId) internal view {
+        if (escrows[_orderId].deadline == 0) {
             revert InvalidOrderId();
         }
     }
 
-    function _disputeExists(uint256 _orderId) internal view {
+    function _disputeExists(bytes32 _orderId) internal view {
         if (disputes[_orderId].timestamp == 0) {
             revert NoDispute();
         }
     }
 
-    modifier escrowExists(uint256 _orderId) {
+    modifier escrowExists(bytes32 _orderId) {
         _escrowExists(_orderId);
         _;
     }
 
-    modifier disputeExists(uint256 _orderId) {
+    modifier disputeExists(bytes32 _orderId) {
         _disputeExists(_orderId);
         _;
     }
 
-    modifier onlyBuyer(uint256 _orderId) {
+    modifier onlyBuyer(bytes32 _orderId) {
         _escrowExists(_orderId);
         if (msg.sender != escrows[_orderId].buyer) {
             revert MustBeBuyer();
@@ -117,7 +118,7 @@ contract GigaCrew {
         _;
     }
 
-    modifier onlySeller(uint256 _orderId) {
+    modifier onlySeller(bytes32 _orderId) {
         _escrowExists(_orderId);
         if (msg.sender != escrows[_orderId].seller) {
             revert MustBeSeller();
@@ -125,7 +126,7 @@ contract GigaCrew {
         _;
     }
 
-    modifier onlyJudge(uint256 _orderId, uint256 _judgeId) {
+    modifier onlyJudge(bytes32 _orderId, uint256 _judgeId) {
         _disputeExists(_orderId);
         if (msg.sender != judges[_judgeId]) {
             revert MustBeJudge();
@@ -141,8 +142,7 @@ contract GigaCrew {
     function registerService(
         string memory _title,
         string memory _description,
-        string memory _communicationChannel,
-        uint256 _rate
+        string memory _communicationChannel
     ) external returns (uint256 service_id) {
         service_id = lastServiceId;
         services[service_id] = Service({
@@ -150,8 +150,7 @@ contract GigaCrew {
             provider: msg.sender,
             title: _title,
             description: _description,
-            communicationChannel: _communicationChannel,
-            rate: _rate
+            communicationChannel: _communicationChannel
         });
         emit ServiceRegistered(service_id, msg.sender);
         lastServiceId++;
@@ -174,40 +173,35 @@ contract GigaCrew {
     }
 
     function createEscrow(
-        uint256 _serviceId,
-        uint256 _deadlinePeriod,
-        string memory _context
-    ) external payable returns (uint256 order_id) {
-        if (_serviceId >= lastServiceId || services[_serviceId].paused) {
-            revert InvalidServiceId();
+        bytes32 _orderId, address _seller, uint256 _deadlinePeriod,
+        uint256 _proposalExpiry, bytes memory _proposalSignature
+    ) external payable {
+        if (escrows[_orderId].deadline > 0) {
+            revert EscrowAlreadyExists();
         }
 
-        // TODO: Can pay more if you want
-        if (msg.value < services[_serviceId].rate) {
-            revert EscrowWithoutEnoughFunding();
+        if (block.timestamp > _proposalExpiry) {
+            revert ProposalExpired();
         }
 
-        address seller = services[_serviceId].provider;
+        bytes32 messageHash = keccak256(abi.encode(bytes32("GigaCrew Proposal: "), _orderId, _proposalExpiry, msg.value, _deadlinePeriod));
+        address signer = ECDSA.recover(messageHash, _proposalSignature);
+        if (signer != _seller) {
+            revert InvalidSignature();
+        }
+
         uint256 deadline = block.timestamp + _deadlinePeriod;
-
-        order_id = lastOrderId;
-        escrows[order_id] = Escrow({
+        escrows[_orderId] = Escrow({
             buyer: msg.sender,
-            seller: seller,
-            serviceId: _serviceId,
+            seller: _seller,
             amount: msg.value,
             deadline: deadline,
-            context: _context,
             status: EscrowStatus.Pending
         });
-        emit EscrowCreated(order_id, _serviceId, msg.sender, seller, _context, deadline);
-        lastOrderId++;
+        emit EscrowCreated(_orderId, msg.sender, _seller, msg.value, deadline);
     }
 
-    function submitPoW(
-        uint256 _orderId,
-        string memory _work
-    ) external onlySeller(_orderId) {
+    function submitPoW(bytes32 _orderId, string memory _work) external onlySeller(_orderId) {
         if (pows[_orderId].timestamp > 0) {
             revert PoWAlreadySubmitted(pows[_orderId].timestamp);
         }
@@ -227,7 +221,7 @@ contract GigaCrew {
         emit PoWSubmitted(_orderId, escrows[_orderId].buyer, msg.sender, _work, block.timestamp + lockPeriod);
     }
 
-    function submitDispute(uint256 _orderId) external onlyBuyer(_orderId) {
+    function submitDispute(bytes32 _orderId) external onlyBuyer(_orderId) {
         if (escrows[_orderId].status != EscrowStatus.Pending) {
             revert EscrowNotPending(escrows[_orderId].status);
         }
@@ -245,7 +239,7 @@ contract GigaCrew {
     }
 
     // TODO: Just an MVP
-    function voteOnDispute(uint256 _orderId, uint256 _judgeId, uint256 _buyerShare) external onlyJudge(_orderId, _judgeId) {
+    function voteOnDispute(bytes32 _orderId, uint256 _judgeId, uint256 _buyerShare) external onlyJudge(_orderId, _judgeId) {
         if (judgeVotes[_orderId][_judgeId]) {
             revert AlreadyVoted();
         }
@@ -268,7 +262,7 @@ contract GigaCrew {
         emit DisputeVote(_orderId, _judgeId, _buyerShare);
     }
 
-    function disputeResult(uint256 _orderId) public disputeExists(_orderId) view returns (uint256 buyerShare) {
+    function disputeResult(bytes32 _orderId) public disputeExists(_orderId) view returns (uint256 buyerShare) {
         if (block.timestamp <= disputes[_orderId].timestamp + disputeResolutionPeriod) {
             revert DisputeResolutionPeriodNotPassed(disputes[_orderId].timestamp + disputeResolutionPeriod);
         }
@@ -282,7 +276,7 @@ contract GigaCrew {
         return disputes[_orderId].buyerShare;
     }
 
-    function withdrawFunds(uint256 _orderId, bytes memory _signature) external escrowExists(_orderId) {
+    function withdrawFunds(bytes32 _orderId, bytes memory _signature) external escrowExists(_orderId) {
         /*
             1. If withdrawn -> revert
             2. If partially withdrawn -> Other party can withdraw

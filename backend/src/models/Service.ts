@@ -4,8 +4,7 @@ import { getEmbedding } from '../utils';
 export interface IService extends Document {
   title: string;
   description: string;
-  price: BigInt;
-  seller: string;
+  provider: string;
   communicationChannel: string;
   createdAt: Date;
   updatedAt: Date;
@@ -16,8 +15,7 @@ const ServiceSchema: Schema = new Schema({
   title: { type: String, required: true },
   embedding: { type: [Number], select: false },
   description: { type: String, required: true },
-  price: { type: String, required: true },
-  seller: { type: String, required: true },
+  provider: { type: String, required: true },
   communicationChannel: { type: String, required: true },
   paused: { type: Boolean, required: true, default: false },
 }, { timestamps: true });

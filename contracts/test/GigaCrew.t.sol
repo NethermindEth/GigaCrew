@@ -9,8 +9,8 @@ contract GigaCrewTest is Test {
     address[] public judges;
     address public buyer;
     address public seller;
-    uint256 public constant PRICE = 1 ether;
-    bytes32 public constant PR_TRAIL = bytes32("some_pr_trail");
+    uint256 public constant PRICE = 5;
+    bytes signature = hex"075d4ed0069cdd5a8de19ec68905365c7a34c1f7c2ae310149af09ce210cbfaa12b2cde6abaad6beee4a0e28750afc95f450831a1215a58fb4afc660e5810ade1c";
 
     function setUp() public {
         // Setup judges
@@ -24,8 +24,9 @@ contract GigaCrewTest is Test {
         
         // Setup buyer and seller
         buyer = makeAddr("buyer");
-        seller = makeAddr("seller");
+        seller = address(0xB0265F11cDcEBDd4220EE4dA5C4477aF72a73cea);
         vm.deal(buyer, 10 ether);
+        vm.warp(9);
     }
 
     function test_RegisterService() public {
@@ -33,97 +34,169 @@ contract GigaCrewTest is Test {
         uint256 serviceId = gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            100
+            "127.0.0.1:8080"
         );
 
         (
+            bool paused,
             address provider,
             string memory title,
             string memory description,
-            string memory communicationChannel,
-            uint256 rate
+            string memory communicationChannel
         ) = gigaCrew.services(serviceId);
         
+        assertFalse(paused);
         assertEq(provider, seller);
         assertEq(title, "title");
         assertEq(description, "description");
         assertEq(communicationChannel, "127.0.0.1:8080");
-        assertEq(rate, 100);
     }
 
     function test_CreateEscrow() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
         
         (
             address escrowBuyer,
             address escrowSeller,
-            uint256 escrowserviceId,
             uint256 amount,
             uint256 deadline,
-            string memory context,
             GigaCrew.EscrowStatus status
         ) = gigaCrew.escrows(orderId);
         
         assertEq(escrowBuyer, buyer);
         assertEq(escrowSeller, seller);
-        assertEq(escrowserviceId, serviceId);
         assertEq(amount, PRICE);
         assertTrue(deadline > block.timestamp);
         assertEq(uint(status), uint(GigaCrew.EscrowStatus.Pending));
-        assertEq(context, "context");
     }
 
-    function test_CreateEscrowWithoutEnoughFunding() public {
+    function test_CreateEscrow_RevertIfEscrowAlreadyExists() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        vm.expectRevert(GigaCrew.EscrowWithoutEnoughFunding.selector);
-        gigaCrew.createEscrow{value: 0}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
+        
+        (
+            address escrowBuyer,
+            address escrowSeller,
+            uint256 amount,
+            uint256 deadline,
+            GigaCrew.EscrowStatus status
+        ) = gigaCrew.escrows(orderId);
+        
+        assertEq(escrowBuyer, buyer);
+        assertEq(escrowSeller, seller);
+        assertEq(amount, PRICE);
+        assertTrue(deadline > block.timestamp);
+        assertEq(uint(status), uint(GigaCrew.EscrowStatus.Pending));
+
+        vm.expectRevert(GigaCrew.EscrowAlreadyExists.selector);
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
+        );
+    }
+
+    function test_CreateEscrowWithBadValues() public {
+        vm.startPrank(seller);
+        gigaCrew.registerService(
+            "title",
+            "description",
+            "127.0.0.1:8080"
+        );
+        vm.stopPrank();
+
+        vm.startPrank(buyer);
+        bytes32 orderId = bytes32(uint256(97));
+        vm.expectRevert(GigaCrew.InvalidSignature.selector);
+        gigaCrew.createEscrow{value: PRICE - 1}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
+        );
+        
+        vm.expectRevert(GigaCrew.InvalidSignature.selector);
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            address(0),
+            100,
+            10,
+            signature
+        );
+        
+        vm.expectRevert(GigaCrew.InvalidSignature.selector);
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            101,
+            10,
+            signature
+        );
+        
+        vm.expectRevert(GigaCrew.InvalidSignature.selector);
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            11,
+            signature
+        );
+        vm.stopPrank();
     }
 
     function test_SubmitPoW() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
-        
+
         // Submit PoW as seller
         vm.prank(seller);
         gigaCrew.submitPoW(orderId, "work_proof");
@@ -141,19 +214,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitPoW_RevertIfNotSeller() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(buyer);
@@ -163,19 +238,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitPoW_RevertIfAlreadySubmitted() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.startPrank(seller);
@@ -188,23 +265,25 @@ contract GigaCrewTest is Test {
 
     function test_SubmitPoW_RevertIfDeadlinePassed() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         // Fast forward past deadline
-        vm.warp(block.timestamp + 1 weeks + 1);
+        vm.warp(block.timestamp + 100 + 1);
 
         vm.prank(seller);
         vm.expectRevert(abi.encodeWithSelector(GigaCrew.DeadlineAlreadyPassed.selector, block.timestamp - 1));
@@ -213,19 +292,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitPoW_RevertIfEmptyWork() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -235,19 +316,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitDispute() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -256,7 +339,7 @@ contract GigaCrewTest is Test {
         vm.prank(buyer);
         gigaCrew.submitDispute(orderId);
 
-        (,,,,,, GigaCrew.EscrowStatus status) = gigaCrew.escrows(orderId);
+        (,,,, GigaCrew.EscrowStatus status) = gigaCrew.escrows(orderId);
         assertEq(uint256(status), uint256(GigaCrew.EscrowStatus.Disputed));
 
         (uint256 buyerShare, uint256 votes, uint256 timestamp) = gigaCrew.disputes(orderId);
@@ -273,19 +356,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitDispute_RevertIfNotBuyer() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -298,19 +383,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitDispute_RevertIfNoPoW() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(buyer);
@@ -320,19 +407,21 @@ contract GigaCrewTest is Test {
 
     function test_SubmitDispute_RevertIfNotPending() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -348,19 +437,21 @@ contract GigaCrewTest is Test {
 
     function test_VoteOnDispute() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -379,23 +470,25 @@ contract GigaCrewTest is Test {
 
     function test_VoteOnDispute_RevertIfNoDispute() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(judges[0]);
         vm.expectRevert(GigaCrew.NoDispute.selector);
-        gigaCrew.voteOnDispute(999, 0, 30);
+        gigaCrew.voteOnDispute(bytes32(uint256(999)), 0, 30);
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(judges[0]);
@@ -405,19 +498,21 @@ contract GigaCrewTest is Test {
 
     function test_VoteOnDispute_RevertIfNotJudge() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -437,19 +532,21 @@ contract GigaCrewTest is Test {
 
     function test_VoteOnDispute_RevertIfAlreadyVoted() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -468,19 +565,21 @@ contract GigaCrewTest is Test {
 
     function test_VoteOnDispute_RevertIfResolutionPeriodPassed() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -498,19 +597,21 @@ contract GigaCrewTest is Test {
 
     function test_VoteOnDispute_RevertIfInvalidBuyerShare() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -526,20 +627,22 @@ contract GigaCrewTest is Test {
 
     function test_DisputeResult() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         // Setup escrow and PoW
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
         
         vm.prank(seller);
@@ -582,19 +685,21 @@ contract GigaCrewTest is Test {
 
     function test_DisputeResult_RevertIfResolutionPeriodNotPassed() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -609,23 +714,25 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_RevertIfOrderIdInvalid() public {
         vm.expectRevert(GigaCrew.InvalidOrderId.selector);
-        gigaCrew.withdrawFunds(999, "");
+        gigaCrew.withdrawFunds(bytes32(uint256(999)), "");
     }
 
     function test_WithdrawFunds_RevertIfEscrowAlreadyWithdrawn() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -646,19 +753,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_BuyerWithdrawnThenSellerWithdraws() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -689,19 +798,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_SellerWithdrawnThenBuyerWithdraws() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -732,19 +843,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_DisputeWithFullBuyerShare() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -767,19 +880,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_DisputeWithFullSellerShare() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -802,19 +917,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_SellerWithdrawsAfterPoWAndLockPeriod() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -830,19 +947,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_BuyerWithdrawsAfterDeadline() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         // Fast forward past deadline without PoW
@@ -855,19 +974,21 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_RevertIfLockPeriodNotPassed() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
         vm.prank(seller);
@@ -879,22 +1000,24 @@ contract GigaCrewTest is Test {
 
     function test_WithdrawFunds_RevertIfDeadlineNotPassed() public {
         vm.startPrank(seller);
-        uint256 serviceId = gigaCrew.registerService(
+        gigaCrew.registerService(
             "title",
             "description",
-            "127.0.0.1:8080",
-            PRICE
+            "127.0.0.1:8080"
         );
         vm.stopPrank();
 
         vm.prank(buyer);
-        uint256 orderId = gigaCrew.createEscrow{value: PRICE}(
-            serviceId,
-            1 weeks,
-            "context"
+        bytes32 orderId = bytes32(uint256(97));
+        gigaCrew.createEscrow{value: PRICE}(
+            orderId,
+            seller,
+            100,
+            10,
+            signature
         );
 
-        vm.expectRevert(abi.encodeWithSelector(GigaCrew.DeadlineNotPassed.selector, block.timestamp + 1 weeks));
+        vm.expectRevert(abi.encodeWithSelector(GigaCrew.DeadlineNotPassed.selector, block.timestamp + 100));
         gigaCrew.withdrawFunds(orderId, "");
     }
 }
