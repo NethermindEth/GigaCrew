@@ -1,29 +1,38 @@
+import path from "path";
+import fs from "fs";
+
 export * from "./sqliteTables.ts";
 export * from "./sqlite_vec.ts";
 
 import {
     DatabaseAdapter,
     elizaLogger,
-    IDatabaseCacheAdapter,
+    type IDatabaseCacheAdapter,
 } from "@elizaos/core";
-import {
+import type {
     Account,
     Actor,
     GoalStatus,
     Participant,
-    type Goal,
-    type Memory,
-    type Relationship,
-    type UUID,
+    Goal,
+    Memory,
+    Relationship,
+    UUID,
     RAGKnowledgeItem,
+    ChunkRow,
+    Adapter,
+    IAgentRuntime,
+    Plugin,
 } from "@elizaos/core";
-import { Database } from "better-sqlite3";
+import type { Database as BetterSqlite3Database } from "better-sqlite3";
 import { v4 } from "uuid";
 import { load } from "./sqlite_vec.ts";
 import { sqliteTables } from "./sqliteTables.ts";
 
+import Database from "better-sqlite3";
+
 export class SqliteDatabaseAdapter
-    extends DatabaseAdapter<Database>
+    extends DatabaseAdapter<BetterSqlite3Database>
     implements IDatabaseCacheAdapter
 {
     async getRoom(roomId: UUID): Promise<UUID | null> {
@@ -74,7 +83,7 @@ export class SqliteDatabaseAdapter
         stmt.run(state, roomId, userId);
     }
 
-    constructor(db: Database) {
+    constructor(db: BetterSqlite3Database) {
         super();
         this.db = db;
         load(db);
@@ -154,18 +163,28 @@ export class SqliteDatabaseAdapter
         agentId: UUID;
         roomIds: UUID[];
         tableName: string;
+        limit?: number;
     }): Promise<Memory[]> {
         if (!params.tableName) {
             // default to messages
             params.tableName = "messages";
         }
+
         const placeholders = params.roomIds.map(() => "?").join(", ");
-        const sql = `SELECT * FROM memories WHERE type = ? AND agentId = ? AND roomId IN (${placeholders})`;
+        let sql = `SELECT * FROM memories WHERE type = ? AND agentId = ? AND roomId IN (${placeholders})`;
+
         const queryParams = [
             params.tableName,
             params.agentId,
             ...params.roomIds,
         ];
+
+        // Add ordering and limit
+        sql += ` ORDER BY createdAt DESC`;
+        if (params.limit) {
+            sql += ` LIMIT ?`;
+            queryParams.push(params.limit.toString());
+        }
 
         const stmt = this.db.prepare(sql);
         const rows = stmt.all(...queryParams) as (Memory & {
@@ -192,6 +211,33 @@ export class SqliteDatabaseAdapter
         }
 
         return null;
+    }
+
+    async getMemoriesByIds(
+        memoryIds: UUID[],
+        tableName?: string
+    ): Promise<Memory[]> {
+        if (memoryIds.length === 0) return [];
+        const queryParams: any[] = [];
+        const placeholders = memoryIds.map(() => "?").join(",");
+        let sql = `SELECT * FROM memories WHERE id IN (${placeholders})`;
+        queryParams.push(...memoryIds);
+
+        if (tableName) {
+            sql += ` AND type = ?`;
+            queryParams.push(tableName);
+        }
+
+        const memories = this.db.prepare(sql).all(...queryParams) as Memory[];
+
+        return memories.map((memory) => ({
+            ...memory,
+            createdAt:
+                typeof memory.createdAt === "string"
+                    ? Date.parse(memory.createdAt as string)
+                    : memory.createdAt,
+            content: JSON.parse(memory.content as unknown as string),
+        }));
     }
 
     async createMemory(memory: Memory, tableName: string): Promise<void> {
@@ -929,8 +975,106 @@ export class SqliteDatabaseAdapter
     }
 
     async removeKnowledge(id: UUID): Promise<void> {
-        const sql = `DELETE FROM knowledge WHERE id = ?`;
-        this.db.prepare(sql).run(id);
+        if (typeof id !== "string") {
+            throw new Error("Knowledge ID must be a string");
+        }
+
+        try {
+            // Execute the transaction and ensure it's called with ()
+            await this.db.transaction(() => {
+                if (id.includes("*")) {
+                    const pattern = id.replace("*", "%");
+                    const sql = "DELETE FROM knowledge WHERE id LIKE ?";
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Executing SQL: ${sql} with pattern: ${pattern}`
+                    );
+                    const stmt = this.db.prepare(sql);
+                    const result = stmt.run(pattern);
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Pattern deletion affected ${result.changes} rows`
+                    );
+                    return result.changes; // Return changes for logging
+                } else {
+                    // Log queries before execution
+                    const selectSql = "SELECT id FROM knowledge WHERE id = ?";
+                    const chunkSql =
+                        "SELECT id FROM knowledge WHERE json_extract(content, '$.metadata.originalId') = ?";
+                    elizaLogger.debug(`[Knowledge Remove] Checking existence with:
+                        Main: ${selectSql} [${id}]
+                        Chunks: ${chunkSql} [${id}]`);
+
+                    const mainEntry = this.db.prepare(selectSql).get(id) as
+                        | ChunkRow
+                        | undefined;
+                    const chunks = this.db
+                        .prepare(chunkSql)
+                        .all(id) as ChunkRow[];
+
+                    elizaLogger.debug(`[Knowledge Remove] Found:`, {
+                        mainEntryExists: !!mainEntry?.id,
+                        chunkCount: chunks.length,
+                        chunkIds: chunks.map((c) => c.id),
+                    });
+
+                    // Execute and log chunk deletion
+                    const chunkDeleteSql =
+                        "DELETE FROM knowledge WHERE json_extract(content, '$.metadata.originalId') = ?";
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Executing chunk deletion: ${chunkDeleteSql} [${id}]`
+                    );
+                    const chunkResult = this.db.prepare(chunkDeleteSql).run(id);
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Chunk deletion affected ${chunkResult.changes} rows`
+                    );
+
+                    // Execute and log main entry deletion
+                    const mainDeleteSql = "DELETE FROM knowledge WHERE id = ?";
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Executing main deletion: ${mainDeleteSql} [${id}]`
+                    );
+                    const mainResult = this.db.prepare(mainDeleteSql).run(id);
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Main deletion affected ${mainResult.changes} rows`
+                    );
+
+                    const totalChanges =
+                        chunkResult.changes + mainResult.changes;
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Total rows affected: ${totalChanges}`
+                    );
+
+                    // Verify deletion
+                    const verifyMain = this.db.prepare(selectSql).get(id);
+                    const verifyChunks = this.db.prepare(chunkSql).all(id);
+                    elizaLogger.debug(
+                        `[Knowledge Remove] Post-deletion check:`,
+                        {
+                            mainStillExists: !!verifyMain,
+                            remainingChunks: verifyChunks.length,
+                        }
+                    );
+
+                    return totalChanges; // Return changes for logging
+                }
+            })(); // Important: Call the transaction function
+
+            elizaLogger.debug(
+                `[Knowledge Remove] Transaction completed for id: ${id}`
+            );
+        } catch (error) {
+            elizaLogger.error("[Knowledge Remove] Error:", {
+                id,
+                error:
+                    error instanceof Error
+                        ? {
+                              message: error.message,
+                              stack: error.stack,
+                              name: error.name,
+                          }
+                        : error,
+            });
+            throw error;
+        }
     }
 
     async clearKnowledge(agentId: UUID, shared?: boolean): Promise<void> {
@@ -948,3 +1092,37 @@ export class SqliteDatabaseAdapter
         }
     }
 }
+
+const sqliteDatabaseAdapter: Adapter = {
+    init: (runtime: IAgentRuntime) => {
+        const dataDir = path.join(process.cwd(), "data");
+
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+
+        const filePath = runtime.getSetting("SQLITE_FILE") ?? path.resolve(dataDir, "db.sqlite");
+        elizaLogger.info(`Initializing SQLite database at ${filePath}...`);
+        const db = new SqliteDatabaseAdapter(new Database(filePath));
+
+        // Test the connection
+        db.init()
+            .then(() => {
+                elizaLogger.success(
+                    "Successfully connected to SQLite database"
+                );
+            })
+            .catch((error) => {
+                elizaLogger.error("Failed to connect to SQLite:", error);
+            });
+
+        return db;
+    },
+};
+
+const sqlitePlugin: Plugin = {
+    name: "sqlite",
+    description: "SQLite database adapter plugin",
+    adapters: [sqliteDatabaseAdapter],
+};
+export default sqlitePlugin;

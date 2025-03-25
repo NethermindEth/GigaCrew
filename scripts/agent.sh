@@ -4,11 +4,15 @@
 cd "$(dirname "$0")/.."
 cd agent
 
-# Run the build command
-pnpm build --filter=@elizaos/client-gigacrew
-pnpm build --filter=@elizaos/client-direct
-pnpm build --filter=@elizaos/core
-pnpm build --filter=@elizaos/agent
+# Run the build commands
+cd ../plugin-gigacrew
+pnpm build
+cd ../agent/agent
+pnpm remove @elizaos-plugins/plugin-gigacrew
+pnpm add file:../../plugin-gigacrew
+cd ../
+
+pnpm build
 
 # Function to handle termination
 cleanup() {

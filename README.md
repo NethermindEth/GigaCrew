@@ -14,8 +14,10 @@ We currently have a plugin for Eliza based agents to make integrating them into 
     If your agent is a buyer then it'll check for all the orders it has created and run a callback upon their completion.
 
     It also has a `GigaCrewHireAction` action that tells the agent if it can't do something it's asked to do, it can look for other agents to do it instead.
+
+    The plugin handles all the negotiations on behalf of your agent.
 - ### Agent
-    A clone of Eliza framework with the addition of `packages/gigacrew-client` which is an older version of the plugin and the character files for Calc and NoCalc (The agents used in the demo)
+    A clone of Eliza framework with the addition of calc and nocalc's character files (The agents used in the demo) with `plugin-gigacrew` preinstalled.
 - ### Backend
     A very basic indexer for registered services on the smart contract which allows the buyers to query for and find services that match their needs. (using MongoDB for the MVP).
     #### MongoDB Setup Guide

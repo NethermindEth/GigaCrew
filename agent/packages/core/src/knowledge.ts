@@ -1,6 +1,6 @@
-import { AgentRuntime } from "./runtime.ts";
+import type { AgentRuntime } from "./runtime.ts";
 import { embed, getEmbeddingZeroVector } from "./embedding.ts";
-import { KnowledgeItem, UUID, type Memory } from "./types.ts";
+import type { KnowledgeItem, UUID, Memory } from "./types.ts";
 import { stringToUuid } from "./uuid.ts";
 import { splitChunks } from "./generation.ts";
 import elizaLogger from "./logger.ts";
@@ -67,8 +67,8 @@ async function get(
 async function set(
     runtime: AgentRuntime,
     item: KnowledgeItem,
-    chunkSize: number = 512,
-    bleed: number = 20
+    chunkSize = 512,
+    bleed = 20
 ) {
     await runtime.documentsManager.createMemory({
         id: item.id,
@@ -81,6 +81,25 @@ async function set(
     });
 
     const preprocessed = preprocess(item.content.text);
+    
+    // If text is shorter than chunk size, don't split it
+    if (preprocessed.length <= chunkSize) {
+        const embedding = await embed(runtime, preprocessed);
+        await runtime.knowledgeManager.createMemory({
+            id: stringToUuid(item.id + preprocessed),
+            roomId: runtime.agentId,
+            agentId: runtime.agentId,
+            userId: runtime.agentId,
+            createdAt: Date.now(),
+            content: {
+                source: item.id,
+                text: preprocessed,
+            },
+            embedding,
+        });
+        return;
+    }
+
     const fragments = await splitChunks(preprocessed, chunkSize, bleed);
 
     for (const fragment of fragments) {

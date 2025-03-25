@@ -1,31 +1,33 @@
-import bodyParser from "body-parser";
-import cors from "cors";
-import express, { Request as ExpressRequest } from "express";
-import multer from "multer";
-import { z } from "zod";
 import {
-    AgentRuntime,
+    composeContext,
     elizaLogger,
-    messageCompletionFooter,
     generateCaption,
     generateImage,
-    Media,
-    getEmbeddingZeroVector,
-    composeContext,
     generateMessageResponse,
     generateObject,
-    Content,
-    Memory,
+    getEmbeddingZeroVector,
+    messageCompletionFooter,
     ModelClass,
-    Client,
-    stringToUuid,
     settings,
-    IAgentRuntime,
+    stringToUuid,
+    type AgentRuntime,
+    type Client,
+    type Content,
+    type IAgentRuntime,
+    type Media,
+    type Memory,
+    type Plugin,
 } from "@elizaos/core";
-import { createApiRouter } from "./api.ts";
+import bodyParser from "body-parser";
+import cors from "cors";
+import express, { type Request as ExpressRequest } from "express";
 import * as fs from "fs";
-import * as path from "path";
+import multer from "multer";
 import OpenAI from "openai";
+import * as path from "path";
+import { z } from "zod";
+import { createApiRouter } from "./api.ts";
+import { createVerifiableLogApiRouter } from "./verifiable-log-api.ts";
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -109,9 +111,11 @@ Response format should be formatted in a JSON block like this:
 
 export class DirectClient {
     public app: express.Application;
-    private agents: Map<string, AgentRuntime>; // container management
+    private agents: Map<string, IAgentRuntime>; // container management
     private server: any; // Store server instance
     public startAgent: Function; // Store startAgent functor
+    public loadCharacterTryPath: Function; // Store loadCharacterTryPath functor
+    public jsonToCharacter: Function; // Store jsonToCharacter functor
 
     constructor() {
         elizaLogger.log("DirectClient constructor");
@@ -134,6 +138,9 @@ export class DirectClient {
 
         const apiRouter = createApiRouter(this.agents, this);
         this.app.use(apiRouter);
+
+        const apiLogRouter = createVerifiableLogApiRouter(this.agents);
+        this.app.use(apiLogRouter);
 
         // Define an interface that extends the Express Request interface
         interface CustomRequest extends ExpressRequest {
@@ -550,38 +557,42 @@ export class DirectClient {
                         content: contentObj,
                     };
 
-                    runtime.messageManager.createMemory(responseMessage).then(() => {
-                          const messageId = stringToUuid(Date.now().toString());
-                          const memory: Memory = {
-                              id: messageId,
-                              agentId: runtime.agentId,
-                              userId,
-                              roomId,
-                              content,
-                              createdAt: Date.now(),
-                          };
+                    runtime.messageManager
+                        .createMemory(responseMessage)
+                        .then(() => {
+                            const messageId = stringToUuid(
+                                Date.now().toString()
+                            );
+                            const memory: Memory = {
+                                id: messageId,
+                                agentId: runtime.agentId,
+                                userId,
+                                roomId,
+                                content,
+                                createdAt: Date.now(),
+                            };
 
-                          // run evaluators (generally can be done in parallel with processActions)
-                          // can an evaluator modify memory? it could but currently doesn't
-                          runtime.evaluate(memory, state).then(() => {
-                            // only need to call if responseMessage.content.action is set
-                            if (contentObj.action) {
-                                // pass memory (query) to any actions to call
-                                runtime.processActions(
-                                    memory,
-                                    [responseMessage],
-                                    state,
-                                    async (_newMessages) => {
-                                        // FIXME: this is supposed override what the LLM said/decided
-                                        // but the promise doesn't make this possible
-                                        //message = newMessages;
-                                        return [memory];
-                                    }
-                                ); // 0.674s
-                            }
-                            resolve(true);
+                            // run evaluators (generally can be done in parallel with processActions)
+                            // can an evaluator modify memory? it could but currently doesn't
+                            runtime.evaluate(memory, state).then(() => {
+                                // only need to call if responseMessage.content.action is set
+                                if (contentObj.action) {
+                                    // pass memory (query) to any actions to call
+                                    runtime.processActions(
+                                        memory,
+                                        [responseMessage],
+                                        state,
+                                        async (_newMessages) => {
+                                            // FIXME: this is supposed override what the LLM said/decided
+                                            // but the promise doesn't make this possible
+                                            //message = newMessages;
+                                            return [memory];
+                                        }
+                                    ); // 0.674s
+                                }
+                                resolve(true);
+                            });
                         });
-                    });
                 });
                 res.json({ response: hfOut });
             }
@@ -645,12 +656,16 @@ export class DirectClient {
             "/fine-tune/:assetId",
             async (req: express.Request, res: express.Response) => {
                 const assetId = req.params.assetId;
-                const downloadDir = path.join(
-                    process.cwd(),
-                    "downloads",
-                    assetId
-                );
 
+                const ROOT_DIR = path.join(process.cwd(), "downloads");
+                const downloadDir = path.resolve(ROOT_DIR, assetId);
+
+                if (!downloadDir.startsWith(ROOT_DIR)) {
+                    res.status(403).json({
+                        error: "Invalid assetId. Access denied.",
+                    });
+                    return;
+                }
                 elizaLogger.log("Download directory:", downloadDir);
 
                 try {
@@ -689,7 +704,7 @@ export class DirectClient {
                     const filePath = path.join(downloadDir, fileName);
                     elizaLogger.log("Full file path:", filePath);
 
-                    await fs.promises.writeFile(filePath, buffer);
+                    await fs.promises.writeFile(filePath, new Uint8Array(buffer));
 
                     // Verify file was written
                     const stats = await fs.promises.stat(filePath);
@@ -848,14 +863,14 @@ export class DirectClient {
                             process.env.ELEVENLABS_MODEL_ID ||
                             "eleven_multilingual_v2",
                         voice_settings: {
-                            stability: parseFloat(
+                            stability: Number.parseFloat(
                                 process.env.ELEVENLABS_VOICE_STABILITY || "0.5"
                             ),
-                            similarity_boost: parseFloat(
+                            similarity_boost: Number.parseFloat(
                                 process.env.ELEVENLABS_VOICE_SIMILARITY_BOOST ||
                                     "0.9"
                             ),
-                            style: parseFloat(
+                            style: Number.parseFloat(
                                 process.env.ELEVENLABS_VOICE_STYLE || "0.66"
                             ),
                             use_speaker_boost:
@@ -922,14 +937,14 @@ export class DirectClient {
                             process.env.ELEVENLABS_MODEL_ID ||
                             "eleven_multilingual_v2",
                         voice_settings: {
-                            stability: parseFloat(
+                            stability: Number.parseFloat(
                                 process.env.ELEVENLABS_VOICE_STABILITY || "0.5"
                             ),
-                            similarity_boost: parseFloat(
+                            similarity_boost: Number.parseFloat(
                                 process.env.ELEVENLABS_VOICE_SIMILARITY_BOOST ||
                                     "0.9"
                             ),
-                            style: parseFloat(
+                            style: Number.parseFloat(
                                 process.env.ELEVENLABS_VOICE_STYLE || "0.66"
                             ),
                             use_speaker_boost:
@@ -968,13 +983,13 @@ export class DirectClient {
     }
 
     // agent/src/index.ts:startAgent calls this
-    public registerAgent(runtime: AgentRuntime) {
+    public registerAgent(runtime: IAgentRuntime) {
         // register any plugin endpoints?
         // but once and only once
         this.agents.set(runtime.agentId, runtime);
     }
 
-    public unregisterAgent(runtime: AgentRuntime) {
+    public unregisterAgent(runtime: IAgentRuntime) {
         this.agents.delete(runtime.agentId);
     }
 
@@ -1007,7 +1022,7 @@ export class DirectClient {
         process.on("SIGINT", gracefulShutdown);
     }
 
-    public stop() {
+    public async stop() {
         if (this.server) {
             this.server.close(() => {
                 elizaLogger.success("Server stopped");
@@ -1017,18 +1032,25 @@ export class DirectClient {
 }
 
 export const DirectClientInterface: Client = {
+    name: 'direct',
+    config: {},
     start: async (_runtime: IAgentRuntime) => {
         elizaLogger.log("DirectClientInterface start");
         const client = new DirectClient();
-        const serverPort = parseInt(settings.SERVER_PORT || "3000");
+        const serverPort = Number.parseInt(settings.SERVER_PORT || "3000");
         client.start(serverPort);
         return client;
     },
-    stop: async (_runtime: IAgentRuntime, client?: Client) => {
-        if (client instanceof DirectClient) {
-            client.stop();
-        }
-    },
+    // stop: async (_runtime: IAgentRuntime, client?: Client) => {
+    //     if (client instanceof DirectClient) {
+    //         client.stop();
+    //     }
+    // },
 };
 
-export default DirectClientInterface;
+const directPlugin: Plugin = {
+    name: "direct",
+    description: "Direct client",
+    clients: [DirectClientInterface],
+};
+export default directPlugin;

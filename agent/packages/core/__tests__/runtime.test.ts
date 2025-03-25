@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentRuntime } from "../src/runtime";
 import {
-    IDatabaseAdapter,
+    type IDatabaseAdapter,
     ModelProviderName,
-    Action,
-    Memory,
-    UUID,
+    type Action,
+    type Memory,
+    type UUID,
 } from "../src/types";
-import { defaultCharacter } from "../src/defaultCharacter";
+import { mockCharacter } from "./mockCharacter.ts";
 
 // Mock dependencies with minimal implementations
 const mockDatabaseAdapter: IDatabaseAdapter = {
@@ -73,7 +73,7 @@ describe("AgentRuntime", () => {
         vi.clearAllMocks();
         runtime = new AgentRuntime({
             token: "test-token",
-            character: defaultCharacter,
+            character: mockCharacter,
             databaseAdapter: mockDatabaseAdapter,
             cacheManager: mockCacheManager,
             modelProvider: ModelProviderName.OPENAI,
