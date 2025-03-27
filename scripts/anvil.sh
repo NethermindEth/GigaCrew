@@ -20,7 +20,7 @@ forge script script/GigaCrew.s.sol --rpc-url http://localhost:8545 --broadcast
 # Make sure ABI files are up to date
 cp out/GigaCrew.sol/GigaCrew.json ../plugin-gigacrew/src/abi/GigaCrew.json
 cp out/GigaCrew.sol/GigaCrew.json ../backend/src/abi/GigaCrew.json
-cp out/GigaCrew.sol/GigaCrew.json ../agent/packages/client-gigacrew/src/abi/GigaCrew.json
+cp out/GigaCrew.sol/GigaCrew.json ../agent/client/src/abi/GigaCrew.json
 
 # Register some services
 cd ..

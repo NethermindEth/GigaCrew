@@ -5,13 +5,25 @@ cd "$(dirname "$0")/.."
 cd agent
 
 # Run the build commands
-cd ../plugin-gigacrew
+cd ../gigacrew-negotiation
 pnpm build
+
+cd ../plugin-gigacrew
+pnpm remove gigacrew-negotiation
+pnpm add file:../gigacrew-negotiation
+pnpm build
+
 cd ../agent/agent
 pnpm remove @elizaos-plugins/plugin-gigacrew
 pnpm add file:../../plugin-gigacrew
+
+cd ../client
+pnpm remove gigacrew-negotiation
+pnpm add file:../../gigacrew-negotiation
 cd ../
 
+pnpm remove gigacrew-negotiation
+pnpm add file:../gigacrew-negotiation
 pnpm build
 
 # Function to handle termination
