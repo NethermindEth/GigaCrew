@@ -64,7 +64,7 @@ export function AppSidebar() {
                                 <div>
                                     {Array.from({ length: 5 }).map(
                                         (_, _index) => (
-                                            <SidebarMenuItem key={"skeleton-item"}>
+                                            <SidebarMenuItem key={"skeleton-item-" + _index}>
                                                 <SidebarMenuSkeleton />
                                             </SidebarMenuItem>
                                         )

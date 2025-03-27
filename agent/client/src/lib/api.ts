@@ -87,6 +87,13 @@ export const apiClient = {
             body: formData,
         });
     },
+    injectMessage: (agentId: string, message: string) => {
+        return fetcher({
+            url: `/${agentId}/inject_message`,
+            method: "POST",
+            body: { text: message },
+        });
+    },
     getAgents: () => fetcher({ url: "/agents" }),
     getAgent: (agentId: string): Promise<{ id: UUID; character: Character }> =>
         fetcher({ url: `/agents/${agentId}` }),

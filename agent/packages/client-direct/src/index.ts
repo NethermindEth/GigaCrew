@@ -20,7 +20,7 @@ import {
 } from "@elizaos/core";
 import bodyParser from "body-parser";
 import cors from "cors";
-import express, { type Request as ExpressRequest } from "express";
+import express, { response, type Request as ExpressRequest } from "express";
 import * as fs from "fs";
 import multer from "multer";
 import OpenAI from "openai";
@@ -349,6 +349,65 @@ export class DirectClient {
                         res.json([]);
                     }
                 }
+            }
+        );
+
+        this.app.post(
+            "/:agentId/inject_message",
+            async (req: express.Request, res: express.Response) => {
+                const agentId = req.params.agentId;
+                const roomId = stringToUuid(
+                    req.body.roomId ?? "default-room-" + agentId
+                );
+                const userId = stringToUuid(req.body.userId ?? "user");
+
+                let runtime = this.agents.get(agentId);
+
+                // if runtime is null, look for runtime with the same name
+                if (!runtime) {
+                    runtime = Array.from(this.agents.values()).find(
+                        (a) =>
+                            a.character.name.toLowerCase() ===
+                            agentId.toLowerCase()
+                    );
+                }
+
+                if (!runtime) {
+                    res.status(404).send("Agent not found");
+                    return;
+                }
+
+                await runtime.ensureConnection(
+                    userId,
+                    roomId,
+                    req.body.userName,
+                    req.body.name,
+                    "direct"
+                );
+
+                const text = req.body.text;
+                // if empty text, directly return
+                if (!text) {
+                    res.json([]);
+                    return;
+                }
+
+                const messageId = stringToUuid(Date.now().toString());
+
+                // save message to memory
+                const response = { text }
+                const messageMemory: Memory = {
+                    id: stringToUuid(messageId + "-" + runtime.agentId),
+                    agentId: runtime.agentId,
+                    userId: runtime.agentId,
+                    roomId: roomId,
+                    content: response,
+                    embedding: getEmbeddingZeroVector(),
+                    createdAt: Date.now(),
+                };
+
+                await runtime.messageManager.createMemory(messageMemory);
+                res.json([response]);
             }
         );
 

@@ -22,8 +22,9 @@ import {
 import { defaultCharacter } from "./defaultCharacter.ts";
 
 import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
-import JSON5 from 'json5';
+import { GigaCrewListServicesAction } from "@elizaos-plugins/plugin-gigacrew";
 
+import JSON5 from 'json5';
 import fs from "fs";
 import net from "net";
 import os from "os";
@@ -630,6 +631,7 @@ export async function createAgent(
         ]
             .flat()
             .filter(Boolean),
+        actions: character.name == "GigaCrew" ? [GigaCrewListServicesAction] : [],
         providers: [],
         managers: [],
         fetch: logFetch,

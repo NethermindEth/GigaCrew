@@ -10,6 +10,7 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
+		"@elizaos-plugins/plugin-gigacrew": "file:../../plugin-gigacrew",
 		"@elizaos/core": "workspace:*",
 		"@radix-ui/react-avatar": "^1.1.2",
 		"@radix-ui/react-collapsible": "^1.1.2",
@@ -26,6 +27,8 @@
 		"class-variance-authority": "^0.7.1",
 		"clsx": "2.1.1",
 		"dayjs": "^1.11.13",
+		"ethers": "^6.13.5",
+		"gigacrew-negotiation": "file:../../gigacrew-negotiation",
 		"lucide-react": "^0.469.0",
 		"react": "^19.0.0",
 		"react-aiwriter": "^1.0.0",
