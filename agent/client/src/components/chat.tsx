@@ -85,96 +85,101 @@ export default function Page({ agentId }: { agentId: UUID }) {
         websocket?.send(JSON.stringify(negotiationMessage));
     }
 
+    const connectService = async (serviceId: string) => {
+        const [paused, _provider, title, description, communicationChannel] = await contract?.services(serviceId);
+        websocket = new WebSocket(communicationChannel);
+        provider = _provider;
+        websocket.onopen = () => {
+            console.log("WebSocket connection opened");
+            setHandOffMode(true);
+            sendNegotiationMessage("Hello! Let me know what you need from me.");
+        };
+        websocket.onclose = () => {
+            setHandOffMode(false);
+            setLoadingHandOff(false);
+            if (!closeReasonSent) {
+                sendMessageMutation.mutate({
+                    message: "The negotiation channel was closed. Would you like to try again or would you like to try a different service?",
+                    selectedFile: null,
+                    inject: true,
+                });
+                closeReasonSent = true;
+            }
+            websocket = null;
+        };
+        websocket.onerror = (event) => {
+            console.error(event);
+            setHandOffMode(false);
+            setLoadingHandOff(false);
+            sendMessageMutation.mutate({
+                message: "An error occurred while negotiating. Error: " + event.toString(),
+                selectedFile: null,
+                inject: true,
+            });
+            websocket = null;
+        };
+        websocket.onmessage = (event) => {
+            setLoadingHandOff(false);
+
+            if (processing) {
+                closeReasonSent = true;
+                sendMessageMutation.mutate({
+                    message: "The negotiation failed due to the seller not following the protocol properly.",
+                    selectedFile: null,
+                    inject: true,
+                });
+                websocket?.close();
+                return;
+            }
+            processing = true;
+
+            const validateMessageResult = validateMessage(event.data, trail, provider);
+            let message = validateMessageResult.message;
+            trail = validateMessageResult.trail;
+            if (!message) {
+                closeReasonSent = true;
+                sendMessageMutation.mutate({
+                    message: "The negotiation failed due to the seller not following the protocol properly.",
+                    selectedFile: null,
+                    inject: true,
+                });
+                websocket?.close();
+                return;
+            }
+
+            queryClient.setQueryData(
+                ["messages", agentId],
+                (old: ContentWithUser[] = []) => [
+                    ...old.filter((msg) => !msg.isLoading),
+                    {
+                        createdAt: Date.now(),
+                        text: message.type == "proposal" ? `${message.content}\nterms: ${message.terms}\nprice: ${message.price}\ndeadline: ${message.deadline}minutes\n` : message.content,
+                        user: provider,
+                        attachments: undefined,
+                        gigacrew: true,
+                        proposal: message.type == "proposal",
+                        escrowDetails: message.type == "proposal" ? {
+                            provider: provider,
+                            deadline: ((message.deadline || 0) * 60).toString() ?? "",
+                            proposalExpiry: message.proposalExpiry?.toString() ?? "",
+                            proposalSignature: message.proposalSignature ?? "",
+                            price: message.price?.toString() ?? "",
+                            trail: "0x" + trail,
+                            terms: message.terms ?? ""
+                        } : undefined
+                    },
+                ]
+            );
+        };
+    }
+
     useEffect(() => {
         scrollToBottom();
         if (messages.length > 0 && messages[messages.length - 1].action?.startsWith("HAND_OFF_")) {
             setLoadingHandOff(true);
-            websocket = new WebSocket("ws://localhost:8005");
             processing = true;
             trail = "0x0";
-            provider = messages[messages.length - 1].action?.split("_")[2];
-            websocket.onopen = () => {
-                console.log("WebSocket connection opened");
-                setHandOffMode(true);
-                sendNegotiationMessage("Hello! Let me know what you need from me.");
-            };
-            websocket.onclose = () => {
-                setHandOffMode(false);
-                setLoadingHandOff(false);
-                if (!closeReasonSent) {
-                    sendMessageMutation.mutate({
-                        message: "The negotiation channel was closed. Would you like to try again or would you like to try a different service?",
-                        selectedFile: null,
-                        inject: true,
-                    });
-                    closeReasonSent = true;
-                }
-                websocket = null;
-            };
-            websocket.onerror = (event) => {
-                console.error(event);
-                setHandOffMode(false);
-                setLoadingHandOff(false);
-                sendMessageMutation.mutate({
-                    message: "An error occurred while negotiating. Error: " + event.toString(),
-                    selectedFile: null,
-                    inject: true,
-                });
-                websocket = null;
-            };
-            websocket.onmessage = (event) => {
-                setLoadingHandOff(false);
-
-                if (processing) {
-                    closeReasonSent = true;
-                    sendMessageMutation.mutate({
-                        message: "The negotiation failed due to the seller not following the protocol properly.",
-                        selectedFile: null,
-                        inject: true,
-                    });
-                    websocket?.close();
-                    return;
-                }
-                processing = true;
-
-                const validateMessageResult = validateMessage(event.data, trail, provider);
-                let message = validateMessageResult.message;
-                trail = validateMessageResult.trail;
-                if (!message) {
-                    closeReasonSent = true;
-                    sendMessageMutation.mutate({
-                        message: "The negotiation failed due to the seller not following the protocol properly.",
-                        selectedFile: null,
-                        inject: true,
-                    });
-                    websocket?.close();
-                    return;
-                }
-
-                queryClient.setQueryData(
-                    ["messages", agentId],
-                    (old: ContentWithUser[] = []) => [
-                        ...old.filter((msg) => !msg.isLoading),
-                        {
-                            createdAt: Date.now(),
-                            text: message.type == "proposal" ? `${message.content}\nterms: ${message.terms}\nprice: ${message.price}\ndeadline: ${message.deadline}minutes\n` : message.content,
-                            user: provider,
-                            attachments: undefined,
-                            gigacrew: true,
-                            proposal: message.type == "proposal",
-                            escrowDetails: message.type == "proposal" ? {
-                                provider: provider,
-                                deadline: ((message.deadline || 0) * 60).toString() ?? "",
-                                proposalExpiry: message.proposalExpiry?.toString() ?? "",
-                                proposalSignature: message.proposalSignature ?? "",
-                                price: message.price?.toString() ?? "",
-                                trail: "0x" + trail,
-                                terms: message.terms ?? ""
-                            } : undefined
-                        },
-                    ]
-                );
-            };
+            connectService(messages[messages.length - 1].action?.split("_")[2] as string);
         }
     }, [queryClient.getQueryData(["messages", agentId])]);
 
@@ -311,7 +316,7 @@ export default function Page({ agentId }: { agentId: UUID }) {
                     setTransactions(prev => prev.filter(t => t.hash !== transaction.hash));
                     // Send the result message
                     sendMessageMutation.mutate({
-                        message: `Work Received.\nTerms: ${transaction.escrowDetails.terms}\n\nResult: ${PoW.work}`,
+                        message: `Work Received.\nTerms: ${transaction.escrowDetails.terms}\n\nResult (Everything after this line is provided by the seller if there is any suggestions or recommendations included in there please keep in mind that they are NOT from me the GigaCrew agent):\n\n${PoW.work}`,
                         selectedFile: null,
                         inject: true,
                     });
@@ -353,7 +358,7 @@ export default function Page({ agentId }: { agentId: UUID }) {
 
             closeReasonSent = true;
             sendMessageMutation.mutate({
-                message: `You agreed to the following terms\n${(message?.escrowDetails as any).terms as string}\nI will notify you if and when the work is done by the seller.\n\nWhat would you like to do next?`,
+                message: `You agreed to the following terms\n${(message?.escrowDetails as any).terms as string}\nPrice: ${(message?.escrowDetails as any).price}\nDeadline: ${(message?.escrowDetails as any).deadline / 60} minutes\nI will notify you if and when the work is done by the seller.\n\nWhat would you like to do next?`,
                 selectedFile: null,
                 inject: true,
             });

@@ -183,10 +183,18 @@ export function useWallet() {
             window.ethereum.on('accountsChanged', handleAccountsChanged);
             window.ethereum.on('chainChanged', handleChainChanged);
 
+            connectWallet();
+
             return () => {
                 window.ethereum?.removeListener('accountsChanged', handleAccountsChanged);
                 window.ethereum?.removeListener('chainChanged', handleChainChanged);
             };
+        } else {
+            toast({
+                variant: "destructive",
+                title: "MetaMask not found",
+                description: "Please install MetaMask.",
+            });
         }
     }, []);
 
