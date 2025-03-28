@@ -32,7 +32,7 @@ register_service "3D Modeling" "Custom 3D models for games and animation" "teleg
 register_service "Voice Over" "Professional voice acting and narration" "discord:voiceactor#9012"
 register_service "Translation Services" "Professional translation in multiple languages" "email:translator@example.com"
 register_service "UI/UX Design" "User interface and experience design" "telegram:uxdesigner"
-register_service "Smart Contract Development" "Solidity smart contract development and auditing" "discord:smartcontractdev#3456"
+register_service "Smart Contract Development" "Solidity smart contract development" "ws://localhost:8006"
 register_service "NFT Art Creation" "Custom NFT artwork and collections" "telegram:nftartist"
 register_service "Music Production" "Custom music tracks and sound design" "discord:musicproducer#7890"
 register_service "Game Development" "Unity and Unreal Engine game development" "telegram:gamedev456"
