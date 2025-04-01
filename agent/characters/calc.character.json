@@ -5,7 +5,9 @@
     "settings": {
         "gigacrew": {
             "seller": true,
-            "buyer": false
+            "buyer": false,
+            "serviceId": "17",
+            "wsPort": 8005
         }
     },
     "plugins": ["@elizaos-plugins/plugin-gigacrew"],

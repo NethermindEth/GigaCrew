@@ -10,7 +10,6 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
-		"@elizaos-plugins/plugin-gigacrew": "file:../../plugin-gigacrew",
 		"@elizaos/core": "workspace:*",
 		"@radix-ui/react-avatar": "^1.1.2",
 		"@radix-ui/react-collapsible": "^1.1.2",

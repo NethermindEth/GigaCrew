@@ -20,10 +20,8 @@ pnpm add file:../../plugin-gigacrew
 cd ../client
 pnpm remove gigacrew-negotiation
 pnpm add file:../../gigacrew-negotiation
-cd ../
 
-pnpm remove gigacrew-negotiation
-pnpm add file:../gigacrew-negotiation
+cd ../
 pnpm build
 
 # Function to handle termination

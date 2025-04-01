@@ -23,6 +23,7 @@ import { defaultCharacter } from "./defaultCharacter.ts";
 
 import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
 import { GigaCrewListServicesAction } from "@elizaos-plugins/plugin-gigacrew";
+import { auditWorkerGenerator } from "./auditor.ts";
 
 import JSON5 from 'json5';
 import fs from "fs";
@@ -602,10 +603,16 @@ export async function initializeClients(
         for (const plugin of character.plugins) {
             if (plugin.clients) {
                 for (const client of plugin.clients) {
+                    if(plugin.name === "GigaCrew") {
+                        elizaLogger.info("Name of the character: ", character.name);
+                        if (character.name === "SmartContractAuditor") {
+                            elizaLogger.info("SmartContractAuditor character found");
+                            (client as any).worker = auditWorkerGenerator(process.env.AUDITOR_BASE_URL, process.env.AUDITOR_API_KEY);
+                        }
+                    }
+
+                    elizaLogger.debug(`Initializing client: ${client.name}`);
                     const startedClient = await client.start(runtime);
-                    elizaLogger.debug(
-                        `Initializing client: ${client.name}`
-                    );
                     clients.push(startedClient);
                 }
             }

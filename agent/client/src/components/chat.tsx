@@ -86,7 +86,7 @@ export default function Page({ agentId }: { agentId: UUID }) {
     }
 
     const connectService = async (serviceId: string) => {
-        const [paused, _provider, title, description, communicationChannel] = await contract?.services(serviceId);
+        const [_paused, _provider, _title, _description, communicationChannel] = await contract?.services(serviceId);
         websocket = new WebSocket(communicationChannel);
         provider = _provider;
         websocket.onopen = () => {
