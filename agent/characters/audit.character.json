@@ -9,7 +9,8 @@
             "seller": true,
             "buyer": false,
             "serviceId": "10",
-            "wsPort": 8007
+            "wsPort": 8007,
+            "workTermsTemplate": "Extract ONLY THE SOLIDITY CODE OF THE CONTRACT TO BE AUDITED that was agreed upon at the end (the last proposal is the one that's accepted) nothing more and nothing less JUST CODE. Here's the conversation: {{recentMessages}}"
         }
     },
     "plugins": ["@elizaos-plugins/plugin-gigacrew"],
