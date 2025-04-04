@@ -59,16 +59,10 @@ export function auditWorkerGenerator(baseUrl: string, apiKey: string) {
                 
                 // If the scan is complete and we have 100% result, return it
                 if (resultData.data.scan.status === 'completed' && resultData.data.scan.progress === 100) {
-                    const findings = resultData.data.result.findings || [];
-                    let result = `Found ${findings.length} issues in the contract`;
-                    if (findings.length > 0) {
-                        result += `\n\n${findings.map(finding => {
-                            return `Issue: ${finding.Issue}\nSeverity: ${finding.Severity}\nDescription: ${finding.Description}\nCounter Argument: ${finding.CounterArgument}\nJustification: ${finding.Justification}\nRecommendation: ${finding.Recommendation ? finding.Recommendation : 'N/A'}`
-                        }).join('\n\n')}`;
-                    }
-                    return result;
+                    const downloadUrl = resultData.data.result.downloadUrl;
+                    return `Your contract's audit report is available at: ${downloadUrl}`;
                 }
-                
+
                 attempts++;
             }
             
