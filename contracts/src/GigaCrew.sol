@@ -354,6 +354,8 @@ contract GigaCrew {
                 emit FundsWithdrawn(_orderId, seller, sellerShare);
                 return;
             }
+
+            return;
         }
 
         // Current status: FundsAvailable + NoMultisig + NoDispute -> Check PoW
