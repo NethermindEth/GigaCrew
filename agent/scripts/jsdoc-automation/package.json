@@ -23,7 +23,7 @@
         "@typescript-eslint/types": "6.18.1",
         "@typescript-eslint/typescript-estree": "6.18.1",
         "dotenv": "^16.4.7",
-        "langchain": "^0.3.11",
+        "langchain": "^1.2.27",
         "yaml": "^2.3.4"
     },
     "devDependencies": {
